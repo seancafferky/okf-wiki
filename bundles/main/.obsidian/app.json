@@ -1,0 +1,10 @@
+{
+  "promptDelete": false,
+  "alwaysUpdateLinks": true,
+  "newFileLocation": "root",
+  "newFileFolderPath": "/",
+  "attachmentFolderPath": "assets",
+  "showLineNumber": true,
+  "spellcheck": true,
+  "trashOption": "local"
+}

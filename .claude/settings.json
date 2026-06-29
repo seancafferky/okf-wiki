@@ -1,0 +1,8 @@
+{
+  "skills": {
+    "create-bundle": {
+      "path": ".claude/skills/create-bundle.md",
+      "description": "Create a new OKF bundle under bundles/ with the complete directory structure, Obsidian configuration, templates, and initial index/log files."
+    }
+  }
+}
