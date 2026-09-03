@@ -147,10 +147,32 @@ When the user asks a question:
 
 1. **Read** `index.md` to identify relevant pages
 2. **Read** those pages and synthesize an answer
-3. **Offer** to file the answer as a new page if it's valuable:
+3. **Apply the filing bar** (below) — decide whether this becomes a new page at all
+4. **Offer** to file the answer as a new page only if it clears the bar:
    - `type: query` for direct answers
    - `type: synthesis` for multi-source analyses or comparisons
-4. If filed: update `index.md`, append to `log.md`, cross-link to related pages
+5. If filed: update `index.md`, append to `log.md`, cross-link to related pages
+
+#### The filing bar
+
+File a `query` or `synthesis` page only when the answer does one of two things:
+
+- **Joins two or more sources** — it connects, compares, or reconciles material
+  that lives on separate pages, so the connection has nowhere else to live
+- **Records a judgment no source contains** — a conclusion, ruling, or
+  interpretation the wiki is making, not one it is reporting
+
+If the answer does neither, it belongs in an existing page. **Improve that page
+instead**: sharpen its claims, add the missing detail, tighten its links. An
+answer restating one source is that source page's job; an answer explaining one
+concept is that concept page's job.
+
+This keeps the wiki compounding rather than accumulating. A wiki of near-duplicate
+query pages is harder to use than the sources it was built from.
+
+The bar covers `query` and `synthesis` only — `source-summary`, `entity`, and
+`concept` pages are created freely during ingest. Formal statement: [SPEC.md
+§4.6](SPEC.md).
 
 ### Lint the wiki
 
@@ -198,6 +220,7 @@ Use the `description` from each page's frontmatter as the one-line summary.
 - Use absolute bundle-relative links (`/path/to/page.md`)
 - Keep frontmatter `timestamp` current on every edit
 - Read `index.md` first before searching for information
+- Meet the filing bar before creating a `query` or `synthesis` page — otherwise improve the existing page
 - Preserve existing frontmatter keys when editing pages (don't drop `tags`, `source`, etc.)
 
 ### ⚠️ Ask first

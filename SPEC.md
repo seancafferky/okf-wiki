@@ -148,7 +148,7 @@ bundles/<bundle-name>/
 │   └── log-entry.md
 ├── index.md                     # Bundle root index (§8)
 ├── log.md                       # Chronological log (§9)
-├── raw/                         # Immutable source documents (not OKF concepts)
+├── raw/                         # Source documents, text-only (§4.4.1)
 │   └── ...
 ├── sources/                     # Source summaries (type: source-summary)
 │   ├── index.md
@@ -194,16 +194,39 @@ recommended minimum.
 
 ### 4.4 The `raw/` directory
 
-Files in `raw/` are **not OKF concepts**. They are immutable source material
-that the LLM reads during ingest. They have no required structure or frontmatter.
-The LLM MUST NOT modify files in `raw/`.
+Files in `raw/` are **not OKF concepts**. They are source material that the LLM
+reads during ingest. They have no required structure or frontmatter. The LLM
+MUST NOT modify the content of a file in `raw/`.
 
 Common raw sources:
-- Articles and papers (PDF converted to markdown, or web-clipped pages)
-- Book notes and chapter summaries written by the human
-- Podcast transcripts
+- Articles and papers (web-clipped pages, extracted PDF text)
+- Book text extracted from EPUB, AZW3 or PDF
+- Podcast and lecture transcripts
 - Data files (CSV, JSON) referenced by wiki pages
-- Images and diagrams
+- OCR of text-bearing images and diagrams
+
+#### 4.4.1 Text-only invariant
+
+`raw/` SHOULD contain plain text and nothing else. A binary original — video,
+audio, PDF, EPUB, Office document, or a text-bearing image — is an input to
+ingest, not a durable artifact: it is large, opaque to search, and expensive to
+version. Producers SHOULD extract its text and delete the original.
+
+The extracted file MUST be named `<original filename>.txt`, retaining the
+original extension, e.g. `Playing to Win.epub.txt`. This preserves the
+provenance of the text after the original is gone and makes a `source:`
+migration a suffix append. An expanded EPUB — a *directory* named `*.epub` —
+collapses to a single `.txt` under the same rule.
+
+An original MUST NOT be deleted until its extracted text has been verified
+present and plausible for the format. A failed extraction keeps its original.
+
+This invariant is a property of `raw/`, not of OKF: a conforming bundle may
+hold binaries. It exists because a wiki reads text, and because a repository
+that versions its sources cannot afford to version their originals.
+
+Reference implementation: `scripts/normalize-raw.py` (extract, verify, purge)
+and `scripts/retarget-sources.py` (repoint `source:` frontmatter afterwards).
 
 ### 4.5 Filed queries
 
@@ -212,6 +235,27 @@ appropriate to their content — `concepts/` for conceptual answers,
 `synthesis/` for multi-source analyses, or a `queries/` directory if the
 producer prefers to keep them separate. The type field, not the directory,
 determines how a page is classified.
+
+### 4.6 The filing bar
+
+A page with type `query` or `synthesis` MUST satisfy at least one of the
+following:
+
+1. **Multi-source join** — the page connects, compares, or reconciles material
+   drawn from two or more other pages, such that the connection is not
+   expressible on any single one of them.
+2. **Original judgment** — the page records a conclusion, ruling, or
+   interpretation that no ingested source states, which the wiki asserts on its
+   own authority.
+
+An answer satisfying neither condition MUST NOT be filed as a new page. The LLM
+SHOULD instead improve the existing page whose subject the answer restates —
+the source page for a single-source restatement, the concept or entity page for
+a single-subject explanation — and update that page's `timestamp`.
+
+This bar applies only to types `query` and `synthesis`. It does not constrain
+`source-summary`, `entity`, or `concept` pages, which are created from a single
+source by the ingest workflow (§9.1).
 
 ---
 
@@ -540,6 +584,9 @@ ordered newest first.
 
 **Procedure:**
 
+0. **Normalize** — if the source is not already plain text, extract it and
+   delete the original per §4.4.1, then repoint any `source:` field that named
+   the original.
 1. **Read** the raw source.
 2. **Discuss** key takeaways with the user. Ask what to emphasize.
 3. **Create** `sources/<source-slug>.md` — a source summary page with
@@ -570,7 +617,11 @@ ordered newest first.
 1. **Read** `index.md` to identify relevant pages.
 2. **Read** those pages.
 3. **Synthesize** an answer with citations to source pages.
-4. **Offer** to file the answer as a new page. If the user agrees:
+4. **Apply the filing bar** (§4.6). If the answer does not clear it, do not
+   create a page — identify the existing page the answer belongs to and
+   improve it instead, then update its `timestamp`.
+5. **Offer** to file the answer as a new page, if it clears the bar. If the
+   user agrees:
    - Create a page with `type: synthesis` (for multi-source answers) or
      `type: query` (for focused answers).
    - Include the question and the synthesized answer.
