@@ -20,6 +20,11 @@ appending ".txt".
 An expanded EPUB (a *directory* named *.epub) is handled as a single unit and
 collapses to one .txt.
 
+A ZIP archive — a source repository, a course's exercise files — collapses to one
+.txt too: every text member concatenated under a `===== path =====` header, with
+the binary members it dropped listed at the end so the archive's shape survives
+the purge.
+
 Usage:
     normalize-raw.py --doctor
     normalize-raw.py PATH                     # dry run: report what would happen
@@ -35,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import os
 import re
 import shutil
@@ -385,6 +391,53 @@ def extract_pptx(path: Path) -> str:
     return tidy("\n\n".join(out))
 
 
+# A member is text if it decodes and is not mostly control bytes. Extension is
+# not consulted: an archive's LICENSE, justfile and rust-toolchain.toml carry no
+# suffix at all, and its .png carries one that says nothing about the bytes.
+def _zip_member_text(raw: bytes) -> str | None:
+    if b"\x00" in raw[:8192]:
+        return None
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if not text.strip():
+        return None
+    printable = sum(c.isprintable() or c in "\n\t" for c in text[:8192])
+    if printable / min(len(text), 8192) < 0.90:
+        return None
+    return text
+
+
+def extract_zip(path: Path) -> str:
+    """Flatten an archive into one greppable document, binaries listed not lost."""
+    kept: list[str] = []
+    dropped: list[str] = []
+    with zipfile.ZipFile(path) as z:
+        for info in sorted(z.infolist(), key=lambda i: i.filename):
+            name = info.filename
+            if info.is_dir() or any(p in JUNK_DIRS for p in Path(name).parts):
+                continue
+            if Path(name).name in JUNK_FILES:
+                continue
+            try:
+                raw = z.read(info)
+            except Exception as e:  # noqa: BLE001 — a bad member is not a bad archive
+                dropped.append(f"{name} ({type(e).__name__})")
+                continue
+            text = _zip_member_text(raw)
+            if text is None:
+                dropped.append(f"{name} ({info.file_size} bytes)")
+                continue
+            kept.append(f"===== {name} =====\n{text.strip()}")
+    if not kept:
+        raise RuntimeError("no text members")
+    body = "\n\n".join(kept)
+    if dropped:
+        body += "\n\n===== binary members (not extracted) =====\n" + "\n".join(dropped)
+    return tidy(body)
+
+
 def extract_docx(path: Path) -> str:
     with zipfile.ZipFile(path) as z:
         if "word/document.xml" not in z.namelist():
@@ -439,6 +492,41 @@ def extract_xlsx(path: Path) -> str:
 
 def extract_html(path: Path) -> str:
     return html_to_text(decode(path.read_bytes()))
+
+
+# --------------------------------------------------------------------------- #
+# Subtitles
+# --------------------------------------------------------------------------- #
+
+# A cue index (a bare integer) or a timing line. Inline markup is the karaoke
+# spans and positioning hints that auto-captioning leaves behind.
+_CUE_INDEX = re.compile(r"^\d+$")
+_CUE_TIMING = re.compile(r"-->")
+_CUE_MARKUP = re.compile(r"<[^>]*>|\{\\[^}]*\}")
+
+
+def extract_subtitles(path: Path) -> str:
+    """SRT/WEBVTT -> continuous prose.
+
+    Dispatch is by content, not extension: a .srt in this corpus turned out to
+    hold WEBVTT, whose timings use MM:SS.mmm rather than HH:MM:SS,mmm. Since
+    every non-text line is dropped either way, one reader covers both.
+
+    Cues are joined into flowing text because the split is the whole problem —
+    a sentence spanning two cues has a timestamp block wedged into the middle of
+    it, so grep finds a phrase inside one cue and silently misses any phrase
+    that crosses a boundary. Consecutive repeats are collapsed: rolling captions
+    restate the previous line in every cue.
+    """
+    out: list[str] = []
+    for line in decode(path.read_bytes()).replace("\r\n", "\n").split("\n"):
+        line = _CUE_MARKUP.sub("", line).strip()
+        if (not line or _CUE_TIMING.search(line) or _CUE_INDEX.match(line)
+                or line.startswith(("WEBVTT", "NOTE", "STYLE", "REGION"))):
+            continue
+        if not out or out[-1] != line:
+            out.append(line)
+    return tidy(" ".join(out))
 
 
 def extract_mhtml(path: Path) -> str:
@@ -546,10 +634,14 @@ HANDLERS: dict[str, Handler] = {
     ".pptx":  Handler(extract_pptx, "office", 100),
     ".docx":  Handler(extract_docx, "office", 100),
     ".xlsx":  Handler(extract_xlsx, "office", 40),
+    ".zip":   Handler(extract_zip, "archive", 200),
     ".html":  Handler(extract_html, "web", 40),
     ".htm":   Handler(extract_html, "web", 40),
     ".xhtml": Handler(extract_html, "web", 40),
     ".mhtml": Handler(extract_mhtml, "web", 40),
+    ".srt":   Handler(extract_subtitles, "subtitle", 40),
+    ".vtt":   Handler(extract_subtitles, "subtitle", 40),
+    ".sbv":   Handler(extract_subtitles, "subtitle", 40),
     ".mht":   Handler(extract_mhtml, "web", 40),
     ".mp4":   Handler(extract_media, "media", 200),
     ".mov":   Handler(extract_media, "media", 200),
@@ -572,6 +664,25 @@ HANDLERS: dict[str, Handler] = {
 JUNK_DIRS = {".transcribe", "__MACOSX", ".ipynb_checkpoints"}
 JUNK_FILES = {".DS_Store", "Thumbs.db", ".lock"}
 JUNK_SUFFIXES = (".stderr", ".log", ".lock")
+
+
+def is_transcription_scratch(path: Path) -> bool:
+    """A whisper JSON dump whose text already sits in a sibling .txt.
+
+    Deliberately narrow. The file must carry whisper's own envelope *and* have
+    the .txt beside it, because a bundle is free to keep .json as a real source;
+    only a redundant machine dump is junk. The envelope holds per-segment timings
+    and the model's parameters wrapped around text that is already extracted,
+    which is scratch by the same definition as .transcribe/ and *.stderr.
+    """
+    if path.suffix.lower() != ".json" or not path.with_suffix(".txt").is_file():
+        return False
+    try:
+        with path.open(encoding="utf-8") as fh:
+            head = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    return isinstance(head, dict) and "transcription" in head and "model" in head
 
 
 def existing_transcript(path: Path) -> Path | None:
@@ -673,7 +784,8 @@ def sweep_junk(root: Path, apply: bool) -> tuple[int, int]:
                 if apply:
                     shutil.rmtree(target)
         for name in filenames:
-            if name in JUNK_FILES or name.endswith(JUNK_SUFFIXES):
+            if (name in JUNK_FILES or name.endswith(JUNK_SUFFIXES)
+                    or is_transcription_scratch(d / name)):
                 target = d / name
                 freed += target.stat().st_size
                 n += 1
