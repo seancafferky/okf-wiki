@@ -152,6 +152,14 @@ the name preserves provenance after the original is gone, and makes repairing a
 `source:` field a matter of appending `.txt`. An expanded EPUB (a *directory*
 named `*.epub`) collapses to one `.txt`.
 
+A **ZIP archive** — a source repository, a course's exercise files — is a binary
+original too, and collapses to one `.txt` the same way: every text member
+concatenated under a `===== path =====` header, with the binary members it
+dropped listed at the end so the archive's shape survives the purge. Membership
+is decided by **content, not extension** — an archive's `LICENSE`, `justfile` and
+`rust-toolchain.toml` carry no suffix, and its `.png` carries one that says
+nothing about the bytes.
+
 Rules that make the purge safe:
 
 - **An original is deleted only after its text is verified** — extracted, and
