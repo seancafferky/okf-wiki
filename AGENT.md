@@ -122,6 +122,60 @@ When the user asks to create a new bundle (or invokes `/create-bundle <name>`):
 See `.claude/skills/create-bundle.md` for the detailed procedure. A shell script
 (`scripts/create-bundle.sh`) is also available for manual use outside the agent.
 
+### Normalize raw sources
+
+**`raw/` holds searchable prose and nothing else.** Two kinds of file fail that
+test, and both get converted and deleted before you read anything.
+
+A **binary original** — video, audio, PDF, EPUB, Office document, or a
+text-bearing image — is an ingest-time input, not a durable asset. It is large,
+opaque to `grep`, and hostile to git.
+
+An **interleaved-text original** — a subtitle track (`.srt`, `.vtt`, `.sbv`) — is
+small, plain text, and versions fine, so it passes every test above and still has
+to go. A sentence spanning two cues has a timestamp block wedged into the middle
+of it, so `grep` matches a phrase that falls inside one cue and **silently
+misses** any phrase crossing a boundary. Conversion rejoins the cues into running
+prose. Do not reason "it's already text, leave it" — that is the trap this rule
+exists to close.
+
+```bash
+python3 scripts/normalize-raw.py bundles/main/raw                    # dry run
+python3 scripts/normalize-raw.py bundles/main/raw --apply --purge --sweep-junk
+python3 scripts/retarget-sources.py bundles/main --apply             # fix source:
+```
+
+The extractor writes `<original filename>.txt` — extension included, so
+`Playing to Win.epub` becomes `Playing to Win.epub.txt` and `12. Order
+Blocks.srt` becomes `12. Order Blocks.srt.txt`. Keeping the original extension in
+the name preserves provenance after the original is gone, and makes repairing a
+`source:` field a matter of appending `.txt`. An expanded EPUB (a *directory*
+named `*.epub`) collapses to one `.txt`.
+
+Rules that make the purge safe:
+
+- **An original is deleted only after its text is verified** — extracted, and
+  long enough for its format to be plausible. Anything that fails extraction
+  keeps its original and is reported. Never delete a failure by hand; fix the
+  extractor or leave the file.
+- **A media file that already has a sibling transcript is purged without
+  re-transcribing.** Both conventions are recognised: `foo.wav.txt` and `foo.txt`.
+- **Check `--doctor` first** if a run reports tool failures. The pipeline needs
+  poppler, tesseract, calibre, ffmpeg and whisper.cpp with a ggml model; EPUB and
+  Office formats need nothing external.
+- **Extraction dispatches on content, not extension.** They disagree in practice:
+  this corpus's `.srt` files hold WebVTT, whose timings are `MM:SS.mmm` rather
+  than SRT's `HH:MM:SS,mmm`. A parser written to the extension emits garbage.
+- **`--sweep-junk`** removes transcription scratch (`.transcribe/`, `*.stderr`,
+  and a whisper `.json` whose text is already in the `.txt` beside it) and
+  `.DS_Store`, then prunes the directories left empty. The `.json` rule is
+  deliberately narrow — a data file a wiki page cites is a legitimate source, so
+  only a dump carrying whisper's own envelope *and* a verified `.txt` sibling is
+  swept.
+
+Run this on **every** new source before ingesting it. `raw/` should never
+accumulate a binary again.
+
 ### Ingest a source
 
 When the user provides a raw source file to process:

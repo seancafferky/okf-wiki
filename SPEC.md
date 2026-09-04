@@ -148,7 +148,7 @@ bundles/<bundle-name>/
 │   └── log-entry.md
 ├── index.md                     # Bundle root index (§8)
 ├── log.md                       # Chronological log (§9)
-├── raw/                         # Source documents, text-only (§4.4.1)
+├── raw/                         # Source documents, searchable prose (§4.4.1)
 │   └── ...
 ├── sources/                     # Source summaries (type: source-summary)
 │   ├── index.md
@@ -205,25 +205,46 @@ Common raw sources:
 - Data files (CSV, JSON) referenced by wiki pages
 - OCR of text-bearing images and diagrams
 
-#### 4.4.1 Text-only invariant
+#### 4.4.1 Searchable-prose invariant
 
-`raw/` SHOULD contain plain text and nothing else. A binary original — video,
-audio, PDF, EPUB, Office document, or a text-bearing image — is an input to
-ingest, not a durable artifact: it is large, opaque to search, and expensive to
-version. Producers SHOULD extract its text and delete the original.
+`raw/` SHOULD contain searchable prose and nothing else. Two distinct kinds of
+file fail that test, and producers SHOULD convert each to text and delete the
+original.
+
+A **binary original** — video, audio, PDF, EPUB, Office document, or a
+text-bearing image — is an input to ingest, not a durable artifact: it is large,
+opaque to search, and expensive to version.
+
+An **interleaved-text original** — a subtitle track (SRT, WebVTT, SBV), or any
+format that distributes running prose across timed or numbered records — is
+small, is plain text, and versions cleanly, and still fails the test that
+matters. A sentence spanning two cues is interrupted by a timestamp block, so a
+search matches a phrase falling wholly inside one cue and silently misses any
+phrase that crosses a boundary. Conversion rejoins the records into continuous
+prose. Being text is therefore NOT sufficient to satisfy this invariant, and
+producers SHOULD NOT infer that it is.
 
 The extracted file MUST be named `<original filename>.txt`, retaining the
-original extension, e.g. `Playing to Win.epub.txt`. This preserves the
-provenance of the text after the original is gone and makes a `source:`
-migration a suffix append. An expanded EPUB — a *directory* named `*.epub` —
-collapses to a single `.txt` under the same rule.
+original extension, e.g. `Playing to Win.epub.txt` or `12. Order Blocks.srt.txt`.
+This preserves the provenance of the text after the original is gone and makes a
+`source:` migration a suffix append. An expanded EPUB — a *directory* named
+`*.epub` — collapses to a single `.txt` under the same rule.
 
 An original MUST NOT be deleted until its extracted text has been verified
 present and plausible for the format. A failed extraction keeps its original.
+A converter SHOULD dispatch on a file's content rather than its extension, since
+the two disagree in practice — a `.srt` may hold WebVTT, whose timings differ.
+
+Separately, a **redundant machine dump** — a tool's own serialization of text
+that has already been extracted beside it, such as a transcription `JSON` next
+to its `.txt` — is scratch rather than source, and MAY be removed. This is
+narrow: it applies only when the dump's own text is verifiably present in the
+sibling, because §4.4 lists data files as a legitimate raw source, and a `JSON`
+a wiki page cites is not scratch.
 
 This invariant is a property of `raw/`, not of OKF: a conforming bundle may
-hold binaries. It exists because a wiki reads text, and because a repository
-that versions its sources cannot afford to version their originals.
+hold binaries. It exists because a wiki searches its sources, and because a
+repository that versions those sources cannot afford to version their originals.
 
 Reference implementation: `scripts/normalize-raw.py` (extract, verify, purge)
 and `scripts/retarget-sources.py` (repoint `source:` frontmatter afterwards).
